@@ -1,0 +1,14 @@
+{
+  "name": "notam-map-server",
+  "version": "1.0.0",
+  "description": "Caching backend for the TAFMap NOTAM overlay — polls Aviation Edge on a fixed schedule and serves cached results.",
+  "main": "notam-map-server.js",
+  "scripts": {
+    "start": "node notam-map-server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "node-cron": "^3.0.3",
+    "node-fetch": "^2.7.0"
+  }
+}
