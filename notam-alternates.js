@@ -22,30 +22,32 @@ const AVIATION_EDGE_KEY = process.env.AVIATION_EDGE_API_KEY;
 
 // --- Curated candidate airports (from the TAFMap project) -----------------
 const TAF_AIRPORTS = [
-  "LSZH","LSGG","LFSB","LOWI","LOWW","LOWG",
-  "EDDF","EDDM","EDDL","EDDH","EDDB","EDDS","EDDP","EDDV","EDDC","EDDK","EDDN","EDVE",
-  "EHAM","EBBR","ELLX","EKCH","EKBI",
-  "LFPG","LFPO","LFMN","LFML","LFLL","LFBO","LFRS","LFBD","LFMP",
-  "LEMD","LEBL","LEMG","LEAL","LEPA","LEIB","LEVC","LEMH","LEZL",
-  "GCFV","GCLP","GCTS","GCRO","GCRR",
-  "LPPT","LPPR","LPFR",
-  "EGLL","EGKK","EGCC","EGPH","EGNX","EICK",
-  "LIRF","LIMC","LIME","LIPZ","LIRN","LIRQ","LICJ","LICC","LIRA","LIBD","LIPE","LIEO",
-  "LGAV","LGTS","LGRP","LGIR","LGKR","LGKO","LGMK","LGZA","LGKL","LGJT",
-  "LTFM","LTAI","LTBA","LTAC",
-  "LMML",
-  "LCLK","LCPH",
-  "LDDU","LDSP","LDZA","LDPL",
-  "LYBE","LYPG","LYBT",
-  "LWSK","LATI","LKPR",
-  "EPWA","EPGD","EPKK",
-  "LHBP","LHDC",
-  "LZIB","LZKZ",
-  "LROP","LRCL","LRTM","LRSB","LRIA",
-  "LBSF","LUKK","EVRA","EETN","EYVI",
-  "ENGM","ESSA","ESGG","EFHK",
-  "UGTB","LLBG","OMDB",
-  "LJLJ","EDAH","EDXW",
+  "EGLL", "LFPG", "EHAM", "EDDF", "LEMD", "LIRF",
+  "LSZH", "EDDM", "LEBL", "EGKK", "EBCI", "EBBR",
+  "LOWW", "LPPT", "EKCH", "ESGG", "ESSA", "EFHK",
+  "ENGM", "LGAV", "LTFM", "EPWA", "LKPR", "LHBP",
+  "LROP", "LDSP", "LDZA", "LJLJ", "LYBE", "LWSK",
+  "LATI", "LGTS", "LCLK", "LLBG", "HEAX", "HESH",
+  "OJAI", "LIMC", "LIME", "LICJ", "LICC", "LFMN",
+  "LFBO", "LFLL", "LFRS", "LFSB", "LEBB", "LEMG",
+  "LEPA", "EGPH", "EGPF", "EGNX", "EGCC", "EGGD",
+  "EIDW", "EINN", "EDDB", "EDDL", "EDDC", "EDDS",
+  "EDNY", "EDDW", "EDDH", "EDDK", "ELLX", "EBLG",
+  "EHRD", "EBOS", "ENBO", "ENBR", "ENVA", "ESMS",
+  "EVRA", "EYVI", "EETN", "LOWG", "EKBI", "EICK",
+  "LFBD", "LFML", "LFPO", "LFMP", "EDDV", "EDAH",
+  "EDXW", "LGKR", "LGIR", "LGKL", "LGKO", "LGMK",
+  "LGRP", "LGZA", "LIPE", "LIRQ", "LIRN", "LIEO",
+  "LIPZ", "LEAL", "LEIB", "LEMH", "LEVC", "LDDU",
+  "EPGD", "EPKK", "EPPO", "EPWR", "LPPR", "LPFR",
+  "LRCL", "LYNI", "LZKZ", "BKPR", "LMML", "LGSA",
+  "LTAI", "EGLC", "EGBB", "LSGG", "EPKT", "EDDN",
+  "EDDP", "LIMF", "LIBR", "LIBD", "LEZG", "LBSF",
+  "LBPD", "LRTR", "LQSA", "LZIB", "ESMQ", "ESPA",
+  "ESNN", "ESNS", "EFKT", "EFOU", "EFRO", "ENTC",
+  "ENAT", "ENZV", "LSZB", "LSGS", "ENSB", "ENEV",
+  "EGSS", "EGGP", "LCPH", "DTMB", "DTTA", "HECA",
+  "HEGN", "LEZL", "LIRA", "LTBA", "LYPG", "LYTV",
 ];
 
 // --- Airport coordinate DB (OurAirports, same source flightsheet.py uses) -
@@ -147,37 +149,45 @@ function nearestAirportsOnRoute(originIcao, destIcao, db, n = 6, endpointBufferN
 // best-effort (marked below) — if NOTAM_DEBUG shows 0 results for one of
 // those specifically, that entry is the first place to check.
 const ICAO_TO_IATA = {
-  LSZH:'ZRH', LSGG:'GVA', LFSB:'BSL', LOWI:'INN', LOWW:'VIE', LOWG:'GRZ',
-  EDDF:'FRA', EDDM:'MUC', EDDL:'DUS', EDDH:'HAM', EDDB:'BER', EDDS:'STR',
-  EDDP:'LEJ', EDDV:'HAJ', EDDC:'DRS', EDDK:'CGN', EDDN:'NUE', EDVE:'BWE',
-  EHAM:'AMS', EBBR:'BRU', ELLX:'LUX', EKCH:'CPH', EKBI:'BLL',
-  LFPG:'CDG', LFPO:'ORY', LFMN:'NCE', LFML:'MRS', LFLL:'LYS', LFBO:'TLS',
-  LFRS:'NTE', LFBD:'BOD', LFMP:'PGF',
-  LEMD:'MAD', LEBL:'BCN', LEMG:'AGP', LEAL:'ALC', LEPA:'PMI', LEIB:'IBZ',
-  LEVC:'VLC', LEMH:'MAH', LEZL:'SVQ',
-  GCFV:'FUE', GCLP:'LPA', GCTS:'TFS', GCRO:'TFN', GCRR:'ACE',
-  LPPT:'LIS', LPPR:'OPO', LPFR:'FAO',
-  EGLL:'LHR', EGKK:'LGW', EGCC:'MAN', EGPH:'EDI', EGNX:'EMA', EICK:'ORK',
-  LIRF:'FCO', LIMC:'MXP', LIME:'BGY', LIPZ:'VCE', LIRN:'NAP', LIRQ:'FLR',
-  LICJ:'PMO', LICC:'CTA', LIRA:'CIA', LIBD:'BRI', LIPE:'BLQ', LIEO:'AHO',
-  LGAV:'ATH', LGTS:'SKG', LGRP:'RHO', LGIR:'HER', LGKR:'CFU', LGKO:'KGS',
-  LGMK:'JMK', LGZA:'ZTH', LGKL:'KLX', LGJT:'JTR', // LGJT/LGKL: best-effort, verify with NOTAM_DEBUG
-  LTFM:'IST', LTAI:'AYT', LTBA:'ISL', LTAC:'ESB',
-  LMML:'MLA',
-  LCLK:'LCA', LCPH:'PFO',
-  LDDU:'DBV', LDSP:'SPU', LDZA:'ZAG', LDPL:'PUY',
-  LYBE:'BEG', LYPG:'TGD', LYBT:'TIV',
-  LWSK:'SKP', LATI:'TIA', LKPR:'PRG',
-  EPWA:'WAW', EPGD:'GDN', EPKK:'KRK',
-  LHBP:'BUD', LHDC:'DEB',
-  LZIB:'BTS', LZKZ:'KSC',
-  LROP:'OTP', LRCL:'CLJ', LRTM:'TGM', LRSB:'SBZ', LRIA:'IAS',
-  LBSF:'SOF', LUKK:'KIV',
-  EVRA:'RIX', EETN:'TLL', EYVI:'VNO',
-  ENGM:'OSL', ESSA:'ARN', ESGG:'GOT', EFHK:'HEL',
-  UGTB:'TBS', LLBG:'TLV', OMDB:'DXB',
-  LJLJ:'LJU',
-  EDAH:'HDF', EDXW:'', // EDXW: no scheduled-service IATA code — falls back to ICAO
+  EGLL:'LHR', LFPG:'CDG', EHAM:'AMS', EDDF:'FRA',
+  LEMD:'MAD', LIRF:'FCO', LSZH:'ZRH', EDDM:'MUC',
+  LEBL:'BCN', EGKK:'LGW', EBCI:'CRL', EBBR:'BRU',
+  LOWW:'VIE', LPPT:'LIS', EKCH:'CPH', ESGG:'GOT',
+  ESSA:'ARN', EFHK:'HEL', ENGM:'OSL', LGAV:'ATH',
+  LTFM:'IST', EPWA:'WAW', LKPR:'PRG', LHBP:'BUD',
+  LROP:'OTP', LDSP:'SPU', LDZA:'ZAG', LJLJ:'LJU',
+  LYBE:'BEG', LWSK:'SKP', LATI:'TIA', LGTS:'SKG',
+  LCLK:'LCA', LLBG:'TLV', HEAX:'ALY', HESH:'SSH',
+  OJAI:'AMM', LIMC:'MXP', LIME:'BGY', LICJ:'PMO',
+  LICC:'CTA', LFMN:'NCE', LFBO:'TLS', LFLL:'LYS',
+  LFRS:'NTE', LFSB:'BSL', LEBB:'BIO', LEMG:'AGP',
+  LEPA:'PMI', EGPH:'EDI', EGPF:'GLA', EGNX:'EMA',
+  EGCC:'MAN', EGGD:'BRS', EIDW:'DUB', EINN:'SNN',
+  EDDB:'BER', EDDL:'DUS', EDDC:'DRS', EDDS:'STR',
+  EDNY:'FDH', EDDW:'BRE', EDDH:'HAM', EDDK:'CGN',
+  ELLX:'LUX', EBLG:'LGG', EHRD:'RTM', EBOS:'OST',
+  ENBO:'BOO', ENBR:'BGO', ENVA:'TRD', ESMS:'MMX',
+  EVRA:'RIX', EYVI:'VNO', EETN:'TLL', LOWG:'GRZ',
+  EKBI:'BLL', EICK:'ORK', LFBD:'BOD', LFML:'MRS',
+  LFPO:'ORY', LFMP:'PGF', EDDV:'HAJ', EDAH:'HDF',
+  EDXW:'', LGKR:'CFU', LGIR:'HER', LGKL:'KLX',
+  LGKO:'KGS', LGMK:'JMK', LGRP:'RHO', LGZA:'ZTH',
+  LIPE:'BLQ', LIRQ:'FLR', LIRN:'NAP', LIEO:'AHO',
+  LIPZ:'VCE', LEAL:'ALC', LEIB:'IBZ', LEMH:'MAH',
+  LEVC:'VLC', LDDU:'DBV', EPGD:'GDN', EPKK:'KRK',
+  EPPO:'POZ', EPWR:'WRO', LPPR:'OPO', LPFR:'FAO',
+  LRCL:'CLJ', LYNI:'INI', LZKZ:'KSC', BKPR:'PRN',
+  LMML:'MLA', LGSA:'CHQ', LTAI:'AYT', EGLC:'LCY',
+  EGBB:'BHX', LSGG:'GVA', EPKT:'KTW', EDDN:'NUE',
+  EDDP:'LEJ', LIMF:'TRN', LIBR:'BDS', LIBD:'BRI',
+  LEZG:'ZAZ', LBSF:'SOF', LBPD:'PDV', LRTR:'TSR',
+  LQSA:'SJJ', LZIB:'BTS', ESMQ:'KLR', ESPA:'LLA',
+  ESNN:'SDL', ESNS:'SFT', EFKT:'KTT', EFOU:'OUL',
+  EFRO:'RVN', ENTC:'TOS', ENAT:'ALF', ENZV:'SVG',
+  LSZB:'BRN', LSGS:'SIR', ENSB:'LYR', ENEV:'EVE',
+  EGSS:'STN', EGGP:'LPL', LCPH:'PFO', DTMB:'MIR',
+  DTTA:'TUN', HECA:'CAI', HEGN:'HRG', LEZL:'SVQ',
+  LIRA:'CIA', LTBA:'ISL', LYPG:'TGD', LYTV:'TIV',
 };
 
 function toIata(icao) {
@@ -330,7 +340,7 @@ async function buildNotamHtmlLines(originIcao, destIcao, n = 6) {
       lines.push(`      ${icao}: none`);
     } else {
       for (const f of flagged) {
-        const cond = f.condition.length > 150 ? f.condition.slice(0, 150) + '…' : f.condition;
+        const cleanedCond = decodeNotamEntities(f.condition); const cond = cleanedCond.length > 150 ? cleanedCond.slice(0, 150) + '…' : cleanedCond;
         const color = CATEGORY_COLORS[f.category] || '#333';
         const safeCond = escapeHtml(cond);
         lines.push(
@@ -357,7 +367,7 @@ async function buildNotamTextBlock(originIcao, destIcao, n = 6) {
       lines.push(`      ${icao}: none`);
     } else {
       for (const f of flagged) {
-        const cond = f.condition.length > 150 ? f.condition.slice(0, 150) + '…' : f.condition;
+        const cleanedCond = decodeNotamEntities(f.condition); const cond = cleanedCond.length > 150 ? cleanedCond.slice(0, 150) + '…' : cleanedCond;
         lines.push(`      ${icao} [${f.category}] ${f.number}: ${cond}`);
       }
     }
@@ -385,7 +395,7 @@ async function buildNotamBlocks(originIcao, destIcao, n = 6) {
       htmlLines.push(`      ${icao}: none`);
     } else {
       for (const f of flagged) {
-        const cond = f.condition.length > 150 ? f.condition.slice(0, 150) + '…' : f.condition;
+        const cleanedCond = decodeNotamEntities(f.condition); const cond = cleanedCond.length > 150 ? cleanedCond.slice(0, 150) + '…' : cleanedCond;
         textLines.push(`      ${icao} [${f.category}] ${f.number}: ${cond}`);
 
         const color = CATEGORY_COLORS[f.category] || '#333';
@@ -457,14 +467,29 @@ function extractRunway(raw) {
   return m ? m[1].toUpperCase() : null;
 }
 
+// Some sources return HTML-entity-encoded punctuation and zero-width
+// spaces embedded directly in the NOTAM text (seen in real EHAM/LSZH data:
+// "&apos;", "&#8203;") — decode/strip these before display so they don't
+// show up as literal garbage once escaped again for HTML output.
+function decodeNotamEntities(str) {
+  return (str || '')
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&#8203;/g, '')
+    .replace(/&amp;/g, '&');
+}
+
+const NOTAM_DESCRIPTION_MAX_LEN = 220;
+
 // Turns a raw NOTAM item ({ category, number, condition }) into a
 // structured object ready for card-style display: parsed validity window,
 // optional recurring schedule, extracted runway, and a clean description.
 function parseNotamItem(item) {
-  const fields = parseNotamFields(item.condition || '');
+  const cleaned = decodeNotamEntities(item.condition || '');
+  const fields = parseNotamFields(cleaned);
   let description = (fields.e || '').trim();
-  if (description) {
-    description = description.charAt(0).toUpperCase() + description.slice(1);
+  if (description.length > NOTAM_DESCRIPTION_MAX_LEN) {
+    description = description.slice(0, NOTAM_DESCRIPTION_MAX_LEN) + '…';
   }
   return {
     category: item.category,
@@ -472,8 +497,8 @@ function parseNotamItem(item) {
     start: parseNotamDate(fields.b),
     end: parseNotamDate(fields.c),
     schedule: fields.d || null,
-    runway: extractRunway(item.condition || ''),
-    description: description || (item.condition || '').slice(0, 150),
+    runway: extractRunway(cleaned),
+    description: description || cleaned.slice(0, NOTAM_DESCRIPTION_MAX_LEN),
   };
 }
 
@@ -515,6 +540,7 @@ module.exports = {
   parseNotamFields,
   parseNotamItem,
   extractRunway,
+  decodeNotamEntities,
   buildNotamCardHtml,
   nearestAirportsOnRoute,
   loadAirportDb,
