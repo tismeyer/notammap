@@ -227,6 +227,7 @@ const RUNWAY_QCODES = ['mrlc', 'falc', 'mnlc'];
 const EXCLUDED_QCODES = ['mxlc']; // taxiway-only closures — never categorized
 const ILS_QCODE_RE = /^i[cdgl]as$/;
 const MINIMA_QCODES = ['pich', 'poch'];
+const MISSED_APPROACH_QCODES = ['puch']; // PU = missed approach procedure, CH = changed
 
 const ALERT_CATEGORIES = [
   {
@@ -249,6 +250,12 @@ const ALERT_CATEGORIES = [
     patterns: [
       /\b(da|dh|oca|och)\b.{0,25}(chang|increas|revis)/i,
       /minima.{0,25}(chang|increas|revis)/i,
+    ],
+  },
+  {
+    label: 'Missed approach procedure changed',
+    patterns: [
+      /missed approach.{0,25}(chang|revis|amend)/i,
     ],
   },
 ];
@@ -277,6 +284,7 @@ function categorize(notam) {
     if (RUNWAY_QCODES.includes(qcode)) return 'Runway/movement area closed';
     if (ILS_QCODE_RE.test(qcode)) return 'ILS/navaid unserviceable';
     if (MINIMA_QCODES.includes(qcode)) return 'Approach minima / DA-DH changed';
+    if (MISSED_APPROACH_QCODES.includes(qcode)) return 'Missed approach procedure changed';
     return null; // recognized Q-code, but not one we track — trust it over free text
   }
 
@@ -328,6 +336,7 @@ const CATEGORY_COLORS = {
   'Runway/movement area closed': '#c62828',   // red
   'ILS/navaid unserviceable': '#2e7d32',      // green
   'Approach minima / DA-DH changed': '#7b1fa2', // purple
+  'Missed approach procedure changed': '#f2c200', // yellow
 };
 
 async function getRouteNotams(originIcao, destIcao, n = 6) {
@@ -436,7 +445,7 @@ async function buildNotamBlocks(originIcao, destIcao, n = 6) {
 }
 
 // --- Per-airport NOTAM status (for the map, not route-based) ---------------
-// Returns the three boolean flags plus the matching NOTAM items for one
+// Returns the four boolean flags plus the matching NOTAM items for one
 // airport, independent of any route — used by the NOTAM map's cache job.
 async function getAirportNotamStatus(icao) {
   const notams = await fetchNotams(icao);
@@ -450,6 +459,7 @@ async function getAirportNotamStatus(icao) {
     runwayClosed: flagged.some((f) => f.category === 'Runway/movement area closed'),
     ilsUs: flagged.some((f) => f.category === 'ILS/navaid unserviceable'),
     minimaChanged: flagged.some((f) => f.category === 'Approach minima / DA-DH changed'),
+    missedApproachChanged: flagged.some((f) => f.category === 'Missed approach procedure changed'),
     items: flagged.map((f) => ({ category: f.category, number: f.number, condition: f.condition })),
   };
 }

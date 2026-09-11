@@ -32,7 +32,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// In-memory cache: { updatedAt, airports: { ICAO: {lat, lon, runwayClosed, ilsUs, minimaChanged, items} } }
+// In-memory cache: { updatedAt, airports: { ICAO: {lat, lon, runwayClosed, ilsUs, minimaChanged, missedApproachChanged, items} } }
 let cache = { updatedAt: null, airports: {} };
 
 async function refreshAll() {
