@@ -215,11 +215,23 @@ async function fetchNotams(icaoCode) {
 // Alert categories, each with its ICAO Q-code pattern(s) plus a plain-text
 // fallback, since Aviation Edge's `condition` field is the raw NOTAM text.
 // Q-code structure: Q) <FIR>/Q<subject 2 letters><condition 2 letters>/...
+// Q-code subject group reference (ICAO Doc 8126, "M" = movement/landing area):
+//   MR = runway, MX = taxiway, MN = apron, FA = aerodrome (whole-airport).
+// MX (taxiway) is deliberately NOT included here — a pure taxiway closure
+// is excluded entirely rather than counted as a runway closure. This also
+// matters for NOTAMs that describe a taxiway closure "relative to" a runway
+// (e.g. "TWY B EAST FM RWY 16/34 CLSD") — those carry an MX code even though
+// the free text mentions "RWY...CLSD", so Q-code must take priority over
+// the text-fallback patterns below or they get miscategorized.
+const RUNWAY_QCODES = ['mrlc', 'falc', 'mnlc'];
+const EXCLUDED_QCODES = ['mxlc']; // taxiway-only closures — never categorized
+const ILS_QCODE_RE = /^i[cdgl]as$/;
+const MINIMA_QCODES = ['pich', 'poch'];
+
 const ALERT_CATEGORIES = [
   {
     label: 'Runway/movement area closed',
     patterns: [
-      /q\)[a-z]{4}\/q(mrlc|mxlc|falc|mnlc)/i, // MR/MX/FA/MN + LC (closed)
       /rwy.{0,10}\bclsd\b/i,
       /runway.{0,15}closed/i,
     ],
@@ -227,7 +239,6 @@ const ALERT_CATEGORIES = [
   {
     label: 'ILS/navaid unserviceable',
     patterns: [
-      /q\)[a-z]{4}\/qi[cdgl]as/i, // IC/ID/IG/IL + AS (unserviceable)
       /\bils\b.{0,25}(u\/s|unserviceable|unavailable)/i,
       /glide ?path.{0,20}(u\/s|unserviceable)/i,
       /localizer.{0,20}(u\/s|unserviceable)/i,
@@ -236,8 +247,6 @@ const ALERT_CATEGORIES = [
   {
     label: 'Approach minima / DA-DH changed',
     patterns: [
-      /q\)[a-z]{4}\/qpich/i, // PI + CH (instrument approach procedure changed)
-      /q\)[a-z]{4}\/qpoch/i, // PO + CH (OCA/OCH changed)
       /\b(da|dh|oca|och)\b.{0,25}(chang|increas|revis)/i,
       /minima.{0,25}(chang|increas|revis)/i,
     ],
@@ -250,10 +259,28 @@ function isActive(notam, now = new Date()) {
   return start <= now && end >= now;
 }
 
+function extractQCode(text) {
+  const m = text.match(/q\)\s*[a-z]{4}\/q([a-z]{4})/i);
+  return m ? m[1].toLowerCase() : null;
+}
+
 // Returns the matching category label, or null if the NOTAM doesn't match
-// any of the categories we care about for the briefing.
+// any of the categories we care about. The Q-code (a structured field) is
+// authoritative when present — free-text pattern matching is only used as
+// a fallback for the rare NOTAM where no Q-code could be extracted at all.
 function categorize(notam) {
   const text = (notam.condition || '').toLowerCase();
+  const qcode = extractQCode(text);
+
+  if (qcode) {
+    if (EXCLUDED_QCODES.includes(qcode)) return null; // taxiway-only — excluded
+    if (RUNWAY_QCODES.includes(qcode)) return 'Runway/movement area closed';
+    if (ILS_QCODE_RE.test(qcode)) return 'ILS/navaid unserviceable';
+    if (MINIMA_QCODES.includes(qcode)) return 'Approach minima / DA-DH changed';
+    return null; // recognized Q-code, but not one we track — trust it over free text
+  }
+
+  // No Q-code found at all — fall back to free-text heuristics.
   for (const cat of ALERT_CATEGORIES) {
     if (cat.patterns.some((re) => re.test(text))) return cat.label;
   }
