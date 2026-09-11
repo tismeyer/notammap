@@ -23,6 +23,15 @@ const { TAF_AIRPORTS, getAirportNotamStatus, loadAirportDb } = require('./notam-
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// CORS — the TAFMap page fetches this from a different origin, so the
+// response needs Access-Control-Allow-Origin or the browser blocks it
+// silently (no error thrown client-side, it just looks like empty data).
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET');
+  next();
+});
+
 // In-memory cache: { updatedAt, airports: { ICAO: {lat, lon, runwayClosed, ilsUs, minimaChanged, items} } }
 let cache = { updatedAt: null, airports: {} };
 
