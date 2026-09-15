@@ -518,6 +518,109 @@ function decodeNotamEntities(str) {
 
 const NOTAM_DESCRIPTION_MAX_LEN = 220;
 
+// --- NOTAM D) schedule parser, ported from the TAFMap NOTAM overlay -------
+// Parses the free-text recurring-schedule field into day/time segments and
+// checks whether a given time window overlaps one. Unlike the map (which
+// checks against a user-picked span on "today"), the email checks against
+// the flight's own scheduled block time, on the flight's actual date.
+const WEEKDAY_ABBR = { mon:0, tue:1, wed:2, thu:3, fri:4, sat:5, sun:6 };
+
+function parseNotamSchedule(dField, refDate) {
+  const d = (dField || '').toLowerCase().trim();
+  const segments = d.split(',').map(s => s.trim()).filter(Boolean);
+  const todayWeekday = (refDate.getUTCDay() + 6) % 7; // convert JS Sun=0 to Mon=0
+  const todayDayOfMonth = refDate.getUTCDate();
+
+  return segments.map(seg => {
+    const timeMatches = [...seg.matchAll(/(\d{4})-(\d{4})/g)].map(m => [m[1], m[2]]);
+    if (timeMatches.length === 0) {
+      return { raw: seg, dayMatch: null, times: [], unparsed: true };
+    }
+    const dayPart = seg.replace(/\d{4}-\d{4}/g, '').trim();
+    let dayMatch = null;
+
+    if (/\bdaily\b/.test(dayPart) || /\bevery day\b/.test(dayPart)) {
+      dayMatch = true;
+    } else {
+      const everyMatch = dayPart.match(/\bevery\s+(mon|tue|wed|thu|fri|sat|sun)\b/);
+      const rangeMatch = dayPart.match(/\b(mon|tue|wed|thu|fri|sat|sun)\s*-\s*(mon|tue|wed|thu|fri|sat|sun)\b/);
+      const wdList = [...dayPart.matchAll(/\b(mon|tue|wed|thu|fri|sat|sun)\b/g)].map(m => m[1]);
+
+      if (everyMatch) {
+        dayMatch = WEEKDAY_ABBR[everyMatch[1]] === todayWeekday;
+      } else if (rangeMatch) {
+        const startWd = WEEKDAY_ABBR[rangeMatch[1]], endWd = WEEKDAY_ABBR[rangeMatch[2]];
+        dayMatch = startWd <= endWd
+          ? (todayWeekday >= startWd && todayWeekday <= endWd)
+          : (todayWeekday >= startWd || todayWeekday <= endWd);
+      } else if (wdList.length > 0) {
+        dayMatch = wdList.some(w => WEEKDAY_ABBR[w] === todayWeekday);
+      } else {
+        const domList = [...dayPart.matchAll(/\b(\d{1,2})\b/g)].map(m => m[1].padStart(2, '0'));
+        dayMatch = domList.length > 0
+          ? domList.includes(String(todayDayOfMonth).padStart(2, '0'))
+          : null;
+      }
+    }
+    return { raw: seg, dayMatch, times: timeMatches, unparsed: dayMatch === null };
+  });
+}
+
+function timeRangesOverlap(selLoMin, selHiMin, startHHMM, endHHMM) {
+  const toMin = t => parseInt(t.slice(0,2),10) * 60 + parseInt(t.slice(2),10);
+  const s = toMin(startHHMM), e = toMin(endHHMM);
+  if (s <= e) {
+    return selLoMin <= e && selHiMin >= s;
+  } else {
+    return (selHiMin >= s) || (selLoMin <= e);
+  }
+}
+
+// Returns { active, unparsed } — whether the D) schedule overlaps at all
+// with [selLoMin, selHiMin] (minutes since UTC 00:00) on refDate.
+// A NOTAM spanning multiple UTC days (e.g. an overnight flight) is checked
+// once per day it touches — see checkScheduleAgainstWindow below.
+function evaluateNotamSchedule(dField, selLoMin, selHiMin, refDate) {
+  const segments = parseNotamSchedule(dField, refDate);
+  const anyUnparsed = segments.some(s => s.unparsed);
+  let active = false;
+  for (const seg of segments) {
+    if (seg.dayMatch) {
+      for (const [start, end] of seg.times) {
+        if (timeRangesOverlap(selLoMin, selHiMin, start, end)) { active = true; break; }
+      }
+    }
+    if (active) break;
+  }
+  return { active, unparsed: anyUnparsed };
+}
+
+// Checks a D) schedule against an absolute UTC time window given as unix
+// seconds (e.g. a flight's departure → arrival). Splits the window into
+// per-day segments so an overnight flight is checked against each UTC date
+// it actually touches, not just the departure date.
+function checkScheduleAgainstWindow(dField, startUnix, endUnix) {
+  let anyActive = false;
+  let anyUnparsed = false;
+  let cursor = new Date(startUnix * 1000);
+  const end = new Date(endUnix * 1000);
+  let iterations = 0;
+  while (cursor <= end && iterations < 4) { // cap: a briefing flight is never multi-day
+    const dayStart = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth(), cursor.getUTCDate()));
+    const dayEnd = new Date(dayStart.getTime() + 24 * 3600 * 1000);
+    const segStart = cursor > dayStart ? cursor : dayStart;
+    const segEndAbs = end < dayEnd ? end : dayEnd;
+    const loMin = Math.floor((segStart - dayStart) / 60000);
+    const hiMin = Math.min(1439, Math.ceil((segEndAbs - dayStart) / 60000));
+    const { active, unparsed } = evaluateNotamSchedule(dField, loMin, hiMin, dayStart);
+    if (active) anyActive = true;
+    if (unparsed) anyUnparsed = true;
+    cursor = dayEnd;
+    iterations++;
+  }
+  return { active: anyActive, unparsed: anyUnparsed };
+}
+
 // Turns a raw NOTAM item ({ category, number, condition }) into a
 // structured object ready for card-style display: parsed validity window,
 // optional recurring schedule, extracted runway, and a clean description.
@@ -540,31 +643,189 @@ function parseNotamItem(item) {
 }
 
 // Builds one HTML card for a single parsed NOTAM item, colored by category.
-// Meant for a map popup — each active category at an airport gets one card.
+// If flightWindow ({startUnix, endUnix}) is given and the item has a D)
+// schedule, the card is greyed out unless the schedule overlaps that window
+// — i.e. "will this actually be in effect during this flight?" rather than
+// just "is it in its overall validity window at all."
 // All text is rendered in capitals (text-transform, so underlying data
 // stays normal-case for anything that reuses parseNotamItem elsewhere).
-function buildNotamCardHtml(icao, item) {
+function buildNotamCardHtml(icao, item, flightWindow) {
   const parsed = parseNotamItem(item);
   const color = CATEGORY_COLORS[parsed.category] || '#333';
   const runwayHtml = parsed.runway
     ? `<span style="font-size:24px;font-weight:bold;color:${color};margin-left:14px;">${parsed.runway}</span>`
     : '';
+
+  let scheduleStatusHtml = '';
+  let cardOpacity = '1';
+  let effectiveColor = color;
+  if (parsed.schedule && flightWindow) {
+    const { active, unparsed } = checkScheduleAgainstWindow(parsed.schedule, flightWindow.startUnix, flightWindow.endUnix);
+    if (unparsed) {
+      scheduleStatusHtml = `<div style="font-size:11px;color:#b8860b;margin-top:4px;font-weight:bold;">⏱ SCHEDULE PARTIALLY UNCLEAR — VERIFY TIMING MANUALLY</div>`;
+    } else if (active) {
+      scheduleStatusHtml = `<div style="font-size:11px;color:${color};margin-top:4px;font-weight:bold;">⚠ ACTIVE DURING THIS FLIGHT</div>`;
+    } else {
+      cardOpacity = '0.45';
+      effectiveColor = '#999';
+      scheduleStatusHtml = `<div style="font-size:11px;color:#999;margin-top:4px;">NOT ACTIVE DURING THIS FLIGHT</div>`;
+    }
+  }
+
   const scheduleHtml = parsed.schedule
-    ? `<div style="font-size:11px;color:#888;margin-top:2px;">Active: ${escapeHtml(parsed.schedule)}</div>`
+    ? `<div style="font-size:11px;color:#888;margin-top:2px;">ACTIVE: ${escapeHtml(parsed.schedule.toUpperCase())}</div>`
     : '';
   return `
-    <div style="border:1px solid #e0e0e0;border-left:4px solid ${color};background:#fafafa;padding:10px 14px;margin-bottom:8px;border-radius:2px;text-transform:uppercase;">
+    <div style="border:1px solid #e0e0e0;border-left:4px solid ${effectiveColor};background:#fafafa;padding:10px 14px;margin-bottom:8px;border-radius:2px;text-transform:uppercase;opacity:${cardOpacity};">
       <div style="display:flex;align-items:baseline;">
-        <span style="font-weight:bold;font-size:15px;color:${color};">${icao}</span>
+        <span style="font-weight:bold;font-size:15px;color:${effectiveColor};">${icao}</span>
         ${runwayHtml}
       </div>
-      <div style="font-weight:bold;color:${color};margin-top:4px;">${escapeHtml(parsed.category)}</div>
+      <div style="font-weight:bold;color:${effectiveColor};margin-top:4px;">${escapeHtml(parsed.category)}</div>
       <div style="font-size:11px;color:#777;margin-top:2px;">NOTAM ${escapeHtml(parsed.number)}</div>
       <div style="font-family:monospace;font-size:12px;color:#333;margin-top:4px;">Valid: ${parsed.start} &#8594; ${parsed.end}</div>
       ${scheduleHtml}
+      ${scheduleStatusHtml}
       <div style="font-size:12px;color:#222;margin-top:4px;">${escapeHtml(parsed.description)}</div>
     </div>
   `;
+}
+
+const NOTAM_CATEGORY_PRIORITY = [
+  'Runway/movement area closed',
+  'ILS/navaid unserviceable',
+  'Approach minima / DA-DH changed',
+  'Missed approach procedure changed',
+];
+
+function sortNotamItemsByPriority(items) {
+  return [...items].sort((a, b) => {
+    const pa = NOTAM_CATEGORY_PRIORITY.indexOf(a.category);
+    const pb = NOTAM_CATEGORY_PRIORITY.indexOf(b.category);
+    return (pa === -1 ? 999 : pa) - (pb === -1 ? 999 : pb);
+  });
+}
+
+// "Runway at a glance" strip: one colored runway label per distinct
+// (runway, category) pair, greyed if none of the contributing NOTAMs are
+// active during the flight window. Mirrors the map popup's header exactly.
+function buildRunwaySummaryHtml(items, flightWindow) {
+  const groups = new Map();
+  for (const item of items) {
+    const parsed = parseNotamItem(item);
+    if (!parsed.runway) continue;
+    let active = true;
+    if (parsed.schedule && flightWindow) {
+      const result = checkScheduleAgainstWindow(parsed.schedule, flightWindow.startUnix, flightWindow.endUnix);
+      active = result.unparsed ? true : result.active;
+    }
+    const key = parsed.runway + '|' + parsed.category;
+    if (groups.has(key)) {
+      groups.get(key).active = groups.get(key).active || active;
+    } else {
+      groups.set(key, { runway: parsed.runway, category: parsed.category, active });
+    }
+  }
+  const sorted = [...groups.values()].sort((a, b) => {
+    const pa = NOTAM_CATEGORY_PRIORITY.indexOf(a.category);
+    const pb = NOTAM_CATEGORY_PRIORITY.indexOf(b.category);
+    return (pa === -1 ? 999 : pa) - (pb === -1 ? 999 : pb);
+  });
+  return sorted.map(g => {
+    const color = CATEGORY_COLORS[g.category] || '#333';
+    const opacity = g.active ? '1' : '0.35';
+    return `<span style="font-size:24px;font-weight:bold;color:${color};margin-right:12px;opacity:${opacity};">${g.runway}</span>`;
+  }).join('');
+}
+
+// Full per-route HTML section for the briefing email: one heading + runway
+// summary + sorted cards per alternate airport with active items, or a
+// compact "ICAO: none" line for airports with nothing active — same
+// structure as the old buildNotamHtmlLines, now with the upgraded cards.
+// flightWindow ({startUnix, endUnix}, unix seconds) lets cards show whether
+// each NOTAM will actually be in effect during this specific flight.
+async function buildNotamEmailHtml(originIcao, destIcao, flightWindow, n = 6) {
+  let routeData;
+  try {
+    routeData = await getRouteNotams(originIcao, destIcao, n);
+  } catch (e) {
+    return `<div style="font-size:12px;color:#888;">NOTAM check skipped: ${escapeHtml(e.message)}</div>`;
+  }
+
+  const sections = routeData.perAirport.map(({ icao, flagged }) => {
+    if (flagged.length === 0) {
+      return `<div style="font-size:12px;color:#2a7a2a;margin-bottom:4px;"><b>${icao}</b>: no active runway/ILS/minima/missed-approach NOTAMs</div>`;
+    }
+    const sortedItems = sortNotamItemsByPriority(flagged);
+    const runwaySummary = buildRunwaySummaryHtml(sortedItems, flightWindow);
+    const cards = sortedItems.map(item => buildNotamCardHtml(icao, item, flightWindow)).join('');
+    return `
+      <div style="margin-bottom:10px;">
+        <div style="display:flex;align-items:baseline;margin-bottom:4px;">
+          <span style="font-family:monospace;font-weight:bold;font-size:15px;margin-right:8px;">${icao}</span>
+          ${runwaySummary}
+        </div>
+        ${cards}
+      </div>
+    `;
+  });
+
+  return `
+    <div style="margin-top:6px;">
+      <div style="font-size:13px;font-weight:bold;margin-bottom:6px;">Enroute alternate NOTAMs (nearest ${routeData.count} to ${originIcao} &#8594; ${destIcao}):</div>
+      ${sections.join('')}
+    </div>
+  `;
+}
+
+// Combined text+HTML builder for the briefing email — single fetch produces
+// both outputs, same efficiency pattern as the original buildNotamBlocks.
+// flightWindow lets both versions show whether each NOTAM will actually be
+// in effect during this specific flight (not just "is it valid at all").
+async function buildNotamEmailBlocks(originIcao, destIcao, flightWindow, n = 6) {
+  let routeData;
+  try {
+    routeData = await getRouteNotams(originIcao, destIcao, n);
+  } catch (e) {
+    const msg = `    NOTAM check skipped: ${e.message}`;
+    return { text: msg, html: escapeHtml(msg) };
+  }
+
+  const textLines = [`    Enroute alternate NOTAMs (nearest ${routeData.count} to ${originIcao}→${destIcao}):`];
+  const htmlSections = [];
+
+  for (const { icao, flagged } of routeData.perAirport) {
+    if (flagged.length === 0) {
+      textLines.push(`      ${icao}: none`);
+      htmlSections.push(`<div style="font-size:12px;color:#2a7a2a;margin-bottom:4px;"><b>${icao}</b>: no active runway/ILS/minima/missed-approach NOTAMs</div>`);
+      continue;
+    }
+    const sortedItems = sortNotamItemsByPriority(flagged);
+    for (const item of sortedItems) {
+      const parsed = parseNotamItem(item);
+      textLines.push(`      ${icao} [${parsed.category}]${parsed.runway ? ' RWY ' + parsed.runway : ''} ${item.number}: ${parsed.description}`);
+    }
+    const runwaySummary = buildRunwaySummaryHtml(sortedItems, flightWindow);
+    const cards = sortedItems.map(item => buildNotamCardHtml(icao, item, flightWindow)).join('');
+    htmlSections.push(`
+      <div style="margin-bottom:10px;">
+        <div style="display:flex;align-items:baseline;margin-bottom:4px;">
+          <span style="font-family:monospace;font-weight:bold;font-size:15px;margin-right:8px;">${icao}</span>
+          ${runwaySummary}
+        </div>
+        ${cards}
+      </div>
+    `);
+  }
+
+  const html = `
+    <div style="margin-top:6px;">
+      <div style="font-size:13px;font-weight:bold;margin-bottom:6px;">Enroute alternate NOTAMs (nearest ${routeData.count} to ${originIcao} &#8594; ${destIcao}):</div>
+      ${htmlSections.join('')}
+    </div>
+  `;
+
+  return { text: textLines.join('\n'), html };
 }
 
 module.exports = {
@@ -572,6 +833,8 @@ module.exports = {
   buildNotamHtmlLines,
   buildNotamTextBlock,
   buildNotamBlocks,
+  buildNotamEmailBlocks,
+  buildNotamEmailHtml,
   getRouteNotams,
   getAirportNotamStatus,
   parseNotamFields,
@@ -579,6 +842,9 @@ module.exports = {
   extractRunway,
   decodeNotamEntities,
   buildNotamCardHtml,
+  buildRunwaySummaryHtml,
+  sortNotamItemsByPriority,
+  checkScheduleAgainstWindow,
   nearestAirportsOnRoute,
   loadAirportDb,
   TAF_AIRPORTS,
