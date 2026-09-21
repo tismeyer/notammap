@@ -106,7 +106,12 @@ function crossAndAlongTrackNm(oLat, oLon, dLat, dLon, pLat, pLon) {
 
   const crossTrackRad = Math.asin(Math.sin(dOp) * Math.sin(brgOp - brgOd));
   const clamped = Math.min(1, Math.max(-1, Math.cos(dOp) / Math.cos(crossTrackRad)));
-  const alongTrackRad = Math.acos(clamped);
+  // acos() only returns the magnitude. Airports BEHIND the origin (more than
+  // 90° off the route bearing) must get a negative along-track distance,
+  // otherwise airports on the backward extension of the route (e.g. LIPZ or
+  // LDSP for LSZH→EGKK) look like they sit right on the track.
+  const sign = Math.cos(brgOp - brgOd) < 0 ? -1 : 1;
+  const alongTrackRad = sign * Math.acos(clamped);
 
   const routeLengthNm = haversineNm(oLat, oLon, dLat, dLon);
   return {
@@ -116,7 +121,11 @@ function crossAndAlongTrackNm(oLat, oLon, dLat, dLon, pLat, pLon) {
   };
 }
 
-function nearestAirportsOnRoute(originIcao, destIcao, db, n = 6, endpointBufferNm = 30) {
+// Airports further than this from the great-circle track are never offered
+// as enroute alternates, even if that leaves fewer than n candidates.
+const MAX_CROSS_TRACK_NM = 80;
+
+function nearestAirportsOnRoute(originIcao, destIcao, db, n = 6, endpointBufferNm = 30, maxCrossTrackNm = MAX_CROSS_TRACK_NM) {
   if (!db[originIcao] || !db[destIcao]) {
     throw new Error(`Missing coordinates for ${originIcao} or ${destIcao}`);
   }
@@ -129,7 +138,8 @@ function nearestAirportsOnRoute(originIcao, destIcao, db, n = 6, endpointBufferN
     if (!db[icao]) continue;
     const [pLat, pLon] = db[icao];
     const { crossTrackNm, alongTrackNm, routeLengthNm } = crossAndAlongTrackNm(oLat, oLon, dLat, dLon, pLat, pLon);
-    if (alongTrackNm >= -endpointBufferNm && alongTrackNm <= routeLengthNm + endpointBufferNm) {
+    if (alongTrackNm >= -endpointBufferNm && alongTrackNm <= routeLengthNm + endpointBufferNm
+        && Math.abs(crossTrackNm) <= maxCrossTrackNm) {
       results.push({ icao, crossTrackNm: Math.abs(crossTrackNm), alongTrackNm });
     }
   }
