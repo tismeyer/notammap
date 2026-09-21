@@ -125,6 +125,11 @@ function crossAndAlongTrackNm(oLat, oLon, dLat, dLon, pLat, pLon) {
 // as enroute alternates, even if that leaves fewer than n candidates.
 const MAX_CROSS_TRACK_NM = 80;
 
+// Airports never offered as enroute alternates (demanding approaches /
+// operationally unsuitable for a diversion). They stay in TAF_AIRPORTS, so
+// TAFMap and the NOTAM map still show them.
+const EXCLUDED_ENROUTE_ALTERNATES = new Set(['LSZB', 'LOWI', 'LSZS', 'LSGS', 'LIRQ', 'EGLC']);
+
 function nearestAirportsOnRoute(originIcao, destIcao, db, n = 6, endpointBufferNm = 30, maxCrossTrackNm = MAX_CROSS_TRACK_NM) {
   if (!db[originIcao] || !db[destIcao]) {
     throw new Error(`Missing coordinates for ${originIcao} or ${destIcao}`);
@@ -135,6 +140,7 @@ function nearestAirportsOnRoute(originIcao, destIcao, db, n = 6, endpointBufferN
   const results = [];
   for (const icao of TAF_AIRPORTS) {
     if (icao === originIcao || icao === destIcao) continue;
+    if (EXCLUDED_ENROUTE_ALTERNATES.has(icao)) continue;
     if (!db[icao]) continue;
     const [pLat, pLon] = db[icao];
     const { crossTrackNm, alongTrackNm, routeLengthNm } = crossAndAlongTrackNm(oLat, oLon, dLat, dLon, pLat, pLon);
